@@ -1,0 +1,34 @@
+{
+  "sampling": {
+    "ecg_hz": 250,
+    "imu_hz": 50,
+    "temperature_hz": 1,
+    "gps_hz": 1
+  },
+  "weights": {
+    "heart": 0.25,
+    "ecg_anomaly": 0.30,
+    "temperature": 0.15,
+    "fall_impact": 0.20,
+    "activity": 0.10
+  },
+  "levels": {
+    "normal_max": 29,
+    "caution_max": 49,
+    "warning_max": 69,
+    "emergency_min": 70
+  },
+  "persistence_seconds": {
+    "caution": 5,
+    "warning": 5,
+    "emergency": 3
+  },
+  "prototype_thresholds": {
+    "impact_g": 2.5,
+    "post_fall_inactivity_s": 8,
+    "high_activity_g": 0.35,
+    "low_activity_g": 0.08,
+    "signal_quality_min": 0.35
+  },
+  "note": "프로젝트용 초기 임계값. 실측 데이터 및 전문가 검토 후 재보정 필요."
+}
