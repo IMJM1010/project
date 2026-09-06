@@ -1,8 +1,8 @@
 {
   "sampling": {
-    "ecg_hz": 250,
-    "imu_hz": 50,
-    "temperature_hz": 1,
+    "ecg_hz": 300,
+    "imu_hz": 100,
+    "temperature_hz": 15,
     "gps_hz": 1
   },
   "weights": {
