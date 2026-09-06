@@ -383,7 +383,9 @@ class WorkerSafetyPipeline:
             and 0 <= p.timestamp_ms - self.last_impact_event_ms <= posture_confirmation_ms
         )
         posture_change_detected = (
-            recent_impact and posture_delta_deg >= posture_delta_threshold
+            recent_impact
+            and 0.75 <= impact_g <= 1.25
+            and posture_delta_deg >= posture_delta_threshold
         )
 
         # [1]→[2]→[3] 순서를 모두 만족하면 낙상 후보로 기억한다.
@@ -457,9 +459,9 @@ class WorkerSafetyPipeline:
         fall = 0.0
         if f.free_fall_detected:
             fall += 10
-        if f.impact_g >= thresholds["impact_g"]:
+        if f.impact_detected:
             fall += clip((f.impact_g - thresholds["impact_g"]) / 2.0 * 45 + 30, 0, 55)
-        if f.posture_delta_deg >= thresholds["posture_change_deg"]:
+        if f.posture_change_detected:
             fall += clip(
                 (f.posture_delta_deg - thresholds["posture_change_deg"]) / 30 * 25 + 10,
                 0, 25
