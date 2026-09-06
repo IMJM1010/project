@@ -23,13 +23,20 @@ const uint8_t REG_FIFO_COUNT = 0x07;
 const uint8_t REG_FIFO_DATA  = 0x08;
 const uint8_t REG_TEMP_SETUP = 0x14;
 
-const uint32_t ECG_HZ = 250;
+const uint32_t ECG_HZ = 300;
+const uint32_t IMU_HZ = 100;
+const uint32_t TEMP_HZ = 15;
+const uint32_t TELEMETRY_HZ = 100;
+
 const uint32_t ECG_PERIOD_US = 1000000UL / ECG_HZ;
+const uint32_t IMU_PERIOD_US = 1000000UL / IMU_HZ;
+const uint32_t TEMP_PERIOD_US = 1000000UL / TEMP_HZ;
+const uint32_t TELEMETRY_PERIOD_US = 1000000UL / TELEMETRY_HZ;
 
 uint32_t nextEcgUs = 0;
-uint32_t lastImuMs = 0;
-uint32_t lastTelemetryMs = 0;
-uint32_t lastTempRequestMs = 0;
+uint32_t lastImuUs = 0;
+uint32_t lastTelemetryUs = 0;
+uint32_t lastTempRequestUs = 0;
 uint32_t tempStartedMs = 0;
 bool tempPending = false;
 
@@ -99,12 +106,13 @@ void requestTemperature() {
 }
 
 void serviceTemperature() {
-  uint32_t now = millis();
-  if (!tempPending && now - lastTempRequestMs >= 1000) {
+  uint32_t nowUs = micros();
+  uint32_t nowMs = millis();
+  if (!tempPending && nowUs - lastTempRequestUs >= TEMP_PERIOD_US) {
     requestTemperature();
-    lastTempRequestMs = now;
+    lastTempRequestUs = nowUs;
   }
-  if (tempPending && now - tempStartedMs >= 55) {
+  if (tempPending && nowMs - tempStartedMs >= 55) {
     uint8_t count = 0;
     if (readRegBytes(MAX30208_ADDR, REG_FIFO_COUNT, &count, 1)) {
       count &= 0x3F;
@@ -121,9 +129,9 @@ void serviceTemperature() {
 }
 
 void serviceImu() {
-  uint32_t now = millis();
-  if (now - lastImuMs < 20) return;
-  lastImuMs = now;
+  uint32_t nowUs = micros();
+  if (nowUs - lastImuUs < IMU_PERIOD_US) return;
+  lastImuUs = nowUs;
   sensors_event_t a, g, temp;
   mpu.getEvent(&a, &g, &temp);
   const float G = 9.80665f;
@@ -225,9 +233,9 @@ void loop() {
   serviceImu();
   serviceTemperature();
   serviceGps();
-  uint32_t now = millis();
-  if (now - lastTelemetryMs >= 1000) {
+  uint32_t nowUs = micros();
+  if (nowUs - lastTelemetryUs >= TELEMETRY_PERIOD_US) {
     sendTelemetry();
-    lastTelemetryMs = now;
+    lastTelemetryUs = nowUs;
   }
 }
