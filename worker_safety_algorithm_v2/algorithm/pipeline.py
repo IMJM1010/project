@@ -48,6 +48,7 @@ class PreprocessedFrame:
     az_g: Optional[float]
     gyro_mag_dps: Optional[float]
     skin_temp_c: Optional[float]
+    skin_temp_updated: bool
     latitude: Optional[float]
     longitude: Optional[float]
     speed_mps: Optional[float]
@@ -148,7 +149,7 @@ class RobustOutlierFilter:
 
 class EcgFilter:
     """0.5Hz high-pass + 35Hz low-pass 1차 IIR."""
-    def __init__(self, fs: float = 250.0):
+    def __init__(self, fs: float = 300.0):
         self.fs = fs
         self.x_prev = 0.0
         self.hp_prev = 0.0
@@ -177,7 +178,7 @@ class EcgFilter:
 
 class RPeakDetector:
     """프로토타입용 적응형 R-peak 검출기. 의료 진단용 아님."""
-    def __init__(self, fs: int = 250):
+    def __init__(self, fs: int = 300):
         self.fs = fs
         self.prev = 0.0
         self.energy_prev2 = 0.0
@@ -241,20 +242,31 @@ class RPeakDetector:
 class WorkerSafetyPipeline:
     """사용자 제공 이미지의 1~7단계 구조를 구현한 핵심 알고리즘."""
     def __init__(self, baseline: PersonalBaseline | None = None,
-                 config_path: str | Path | None = None, ecg_fs: int = 250):
+                 config_path: str | Path | None = None, ecg_fs: int | None = None):
         self.baseline = baseline or PersonalBaseline()
         if config_path is None:
             config_path = Path(__file__).resolve().parents[1] / "config" / "risk_config.json"
         self.config = json.loads(Path(config_path).read_text(encoding="utf-8"))
 
-        self.ecg_filter = EcgFilter(ecg_fs)
+        sampling = self.config["sampling"]
+        self.ecg_fs = int(ecg_fs or sampling["ecg_hz"])
+        self.imu_fs = int(sampling["imu_hz"])
+        self.temperature_fs = int(sampling["temperature_hz"])
+
+        self.ecg_filter = EcgFilter(self.ecg_fs)
         self.ecg_outlier = RobustOutlierFilter()
-        self.temp_outlier = RobustOutlierFilter(size=15, z_limit=4.0)
-        self.ax_smooth = MovingAverage(5)
-        self.ay_smooth = MovingAverage(5)
-        self.az_smooth = MovingAverage(5)
-        self.temp_smooth = MovingAverage(5)
-        self.rpeak = RPeakDetector(ecg_fs)
+
+        # 샘플링 주파수가 바뀌어도 필터의 시간 폭은 기존과 비슷하게 유지한다.
+        imu_smooth_samples = max(1, round(self.imu_fs * 0.10))       # 약 100 ms
+        temp_outlier_samples = max(7, round(self.temperature_fs * 15.0))  # 약 15 s
+        temp_smooth_samples = max(1, round(self.temperature_fs * 5.0))    # 약 5 s
+
+        self.temp_outlier = RobustOutlierFilter(size=temp_outlier_samples, z_limit=4.0)
+        self.ax_smooth = MovingAverage(imu_smooth_samples)
+        self.ay_smooth = MovingAverage(imu_smooth_samples)
+        self.az_smooth = MovingAverage(imu_smooth_samples)
+        self.temp_smooth = MovingAverage(temp_smooth_samples)
+        self.rpeak = RPeakDetector(self.ecg_fs)
 
         self.current_bpm: Optional[float] = None
         self.current_anomaly = 0.0
@@ -266,7 +278,9 @@ class WorkerSafetyPipeline:
         self.last_stable_roll_deg: Optional[float] = None
         self.prefall_pitch_deg: Optional[float] = None
         self.prefall_roll_deg: Optional[float] = None
-        self.last_temp_values = deque(maxlen=120)
+        self.last_temp_values = deque(
+            maxlen=max(2, round(self.temperature_fs * 120.0))
+        )
         self._caution_since_ms: Optional[int] = None
         self._warning_since_ms: Optional[int] = None
         self._emergency_since_ms: Optional[int] = None
@@ -289,12 +303,13 @@ class WorkerSafetyPipeline:
         if None not in (raw.gx_dps, raw.gy_dps, raw.gz_dps):
             gyro_mag = sqrt(raw.gx_dps**2 + raw.gy_dps**2 + raw.gz_dps**2)
 
+        temp_updated = raw.skin_temp_c is not None
         temp = self.temp_smooth.update(self.temp_outlier.update(raw.skin_temp_c))
         return PreprocessedFrame(
             timestamp_ms=raw.timestamp_ms,
             ecg=ecg, signal_quality=quality, lead_off=raw.lead_off,
             ax_g=ax, ay_g=ay, az_g=az, gyro_mag_dps=gyro_mag,
-            skin_temp_c=temp,
+            skin_temp_c=temp, skin_temp_updated=temp_updated,
             latitude=raw.latitude if raw.gps_valid else None,
             longitude=raw.longitude if raw.gps_valid else None,
             speed_mps=raw.speed_mps if raw.gps_valid else None,
@@ -407,7 +422,8 @@ class WorkerSafetyPipeline:
         temp_slope = 0.0
         if p.skin_temp_c is not None:
             temp_delta = p.skin_temp_c - self.baseline.skin_temp_c
-            self.last_temp_values.append((p.timestamp_ms, p.skin_temp_c))
+            if p.skin_temp_updated:
+                self.last_temp_values.append((p.timestamp_ms, p.skin_temp_c))
             if len(self.last_temp_values) >= 2:
                 t0, v0 = self.last_temp_values[0]
                 t1, v1 = self.last_temp_values[-1]
