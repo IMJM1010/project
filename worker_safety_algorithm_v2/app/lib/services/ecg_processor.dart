@@ -17,7 +17,7 @@ class EcgProcessor {
   int? lastPeak;
   final List<double> rr = [];
 
-  EcgProcessor({this.fs = 250});
+  EcgProcessor({this.fs = 300});
 
   EcgOutput process(int raw) {
     final x = raw.toDouble();
