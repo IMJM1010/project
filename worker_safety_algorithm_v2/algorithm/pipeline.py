@@ -65,9 +65,14 @@ class ExtractedFeatures:
     activity_g: float = 0.0
     posture_change_dps: float = 0.0
     posture_angle_deg: float = 0.0
+    pitch_deg: float = 0.0
+    roll_deg: float = 0.0
+    posture_delta_deg: float = 0.0
     impact_g: float = 0.0
     inactivity_sec: float = 0.0
     free_fall_detected: bool = False
+    impact_detected: bool = False
+    posture_change_detected: bool = False
     fall_candidate: bool = False
     skin_temp_c: Optional[float] = None
     temp_delta_c: Optional[float] = None
@@ -257,6 +262,10 @@ class WorkerSafetyPipeline:
         self.last_free_fall_event_ms: Optional[int] = None
         self.last_impact_event_ms: Optional[int] = None
         self.last_fall_event_ms: Optional[int] = None
+        self.last_stable_pitch_deg: Optional[float] = None
+        self.last_stable_roll_deg: Optional[float] = None
+        self.prefall_pitch_deg: Optional[float] = None
+        self.prefall_roll_deg: Optional[float] = None
         self.last_temp_values = deque(maxlen=120)
         self._caution_since_ms: Optional[int] = None
         self._warning_since_ms: Optional[int] = None
@@ -301,16 +310,22 @@ class WorkerSafetyPipeline:
 
         activity_g = impact_g = 0.0
         posture_angle_deg = 0.0
+        pitch_deg = 0.0
+        roll_deg = 0.0
         if None not in (p.ax_g, p.ay_g, p.az_g):
             total_g = sqrt(p.ax_g**2 + p.ay_g**2 + p.az_g**2)
             activity_g = abs(total_g - 1.0)
             impact_g = total_g
 
-            # 프로토타입 착용 방향에서 Z축을 수직축으로 가정.
-            # 0°에 가까우면 직립, 90°에 가까우면 누운 자세로 해석.
+            # MPU6050 가속도 기반 자세 추정.
+            # 착용 기준: Z축이 서 있을 때 수직 방향이라고 가정.
             if total_g > 1e-6:
                 vertical_ratio = clip(abs(p.az_g) / total_g, 0.0, 1.0)
                 posture_angle_deg = math.degrees(math.acos(vertical_ratio))
+                pitch_deg = math.degrees(
+                    math.atan2(-p.ax_g, sqrt(p.ay_g**2 + p.az_g**2))
+                )
+                roll_deg = math.degrees(math.atan2(p.ay_g, p.az_g))
 
         posture = p.gyro_mag_dps or 0.0
 
@@ -326,35 +341,59 @@ class WorkerSafetyPipeline:
 
         free_fall_threshold = thresholds["free_fall_g"]
         impact_threshold = thresholds["impact_g"]
-        posture_angle_threshold = thresholds["posture_angle_deg"]
+        posture_delta_threshold = thresholds["posture_change_deg"]
         sequence_window_ms = int(thresholds["fall_sequence_window_s"] * 1000)
         posture_confirmation_ms = int(thresholds["posture_confirmation_s"] * 1000)
+        fall_candidate_window_ms = int(thresholds["fall_candidate_window_s"] * 1000)
 
+        # 안정 자세(약 1 g)일 때 직전 Pitch/Roll을 저장한다.
+        if 0.85 <= impact_g <= 1.15 and activity_g <= thresholds["low_activity_g"]:
+            self.last_stable_pitch_deg = pitch_deg
+            self.last_stable_roll_deg = roll_deg
+
+        # [1] 자유낙하: SVM < 0.8 g (설정값 변경 가능)
         free_fall_detected = impact_g < free_fall_threshold
         if free_fall_detected:
+            # 낙상 직전 안정 자세를 기준 자세로 고정한다.
+            if self.last_stable_pitch_deg is not None:
+                self.prefall_pitch_deg = self.last_stable_pitch_deg
+                self.prefall_roll_deg = self.last_stable_roll_deg
             self.last_free_fall_event_ms = p.timestamp_ms
 
-        if impact_g >= impact_threshold:
+        # [2] 충격: 자유낙하 후 지정 시간 내 SVM >= 2.5 g
+        recent_free_fall = (
+            self.last_free_fall_event_ms is not None
+            and 0 <= p.timestamp_ms - self.last_free_fall_event_ms <= sequence_window_ms
+        )
+        impact_detected = impact_g >= impact_threshold and recent_free_fall
+        if impact_detected:
             self.last_impact_event_ms = p.timestamp_ms
+
+        # [3] 자세 변화: 낙상 직전 Pitch/Roll 대비 큰 변화 확인
+        pitch_delta = 0.0 if self.prefall_pitch_deg is None else abs(
+            pitch_deg - self.prefall_pitch_deg
+        )
+        roll_delta = 0.0 if self.prefall_roll_deg is None else abs(
+            roll_deg - self.prefall_roll_deg
+        )
+        posture_delta_deg = max(pitch_delta, roll_delta)
 
         recent_impact = (
             self.last_impact_event_ms is not None
             and 0 <= p.timestamp_ms - self.last_impact_event_ms <= posture_confirmation_ms
         )
-        recent_free_fall = (
-            self.last_free_fall_event_ms is not None
-            and self.last_impact_event_ms is not None
-            and 0 <= self.last_impact_event_ms - self.last_free_fall_event_ms <= sequence_window_ms
+        posture_change_detected = (
+            recent_impact and posture_delta_deg >= posture_delta_threshold
         )
-        abnormal_posture = posture_angle_deg >= posture_angle_threshold
 
-        # 낙상 후보: 자유낙하→충격→누운 자세 또는 강한 회전→충격→누운 자세.
-        if recent_impact and abnormal_posture and (recent_free_fall or posture >= 120):
+        # [1]→[2]→[3] 순서를 모두 만족하면 낙상 후보로 기억한다.
+        if posture_change_detected:
             self.last_fall_event_ms = p.timestamp_ms
 
+        # [4] 낙상 후 5~10초 상태 확인을 위해 후보 상태를 유지한다.
         fall_candidate = (
             self.last_fall_event_ms is not None
-            and 0 <= p.timestamp_ms - self.last_fall_event_ms <= 15000
+            and 0 <= p.timestamp_ms - self.last_fall_event_ms <= fall_candidate_window_ms
         )
 
         motion_penalty = clip(activity_g / 1.2, 0, 0.75)
@@ -384,9 +423,14 @@ class WorkerSafetyPipeline:
             activity_g=activity_g,
             posture_change_dps=posture,
             posture_angle_deg=posture_angle_deg,
+            pitch_deg=pitch_deg,
+            roll_deg=roll_deg,
+            posture_delta_deg=posture_delta_deg,
             impact_g=impact_g,
             inactivity_sec=inactivity,
             free_fall_detected=free_fall_detected,
+            impact_detected=impact_detected,
+            posture_change_detected=posture_change_detected,
             fall_candidate=fall_candidate,
             skin_temp_c=p.skin_temp_c,
             temp_delta_c=temp_delta,
@@ -415,8 +459,11 @@ class WorkerSafetyPipeline:
             fall += 10
         if f.impact_g >= thresholds["impact_g"]:
             fall += clip((f.impact_g - thresholds["impact_g"]) / 2.0 * 45 + 30, 0, 55)
-        if f.posture_angle_deg >= thresholds["posture_angle_deg"]:
-            fall += clip((f.posture_angle_deg - thresholds["posture_angle_deg"]) / 30 * 25 + 10, 0, 25)
+        if f.posture_delta_deg >= thresholds["posture_change_deg"]:
+            fall += clip(
+                (f.posture_delta_deg - thresholds["posture_change_deg"]) / 30 * 25 + 10,
+                0, 25
+            )
         if f.inactivity_sec >= 5:
             fall += clip((f.inactivity_sec - 5) / 15 * 20, 0, 20)
         if f.fall_candidate:
@@ -433,10 +480,13 @@ class WorkerSafetyPipeline:
     def assess(self, f: ExtractedFeatures, r: IndividualRisks) -> Assessment:
         thresholds = self.config["prototype_thresholds"]
         min_quality = thresholds["signal_quality_min"]
-        inactive_emergency = f.inactivity_sec >= thresholds["inactivity_emergency_s"]
+        fall_emergency = (
+            f.fall_candidate
+            and f.inactivity_sec >= thresholds["post_fall_inactivity_s"]
+        )
 
-        # 사용자가 지정한 안전 규칙: 10초 이상 무동작은 ECG 상태와 무관하게 EMERGENCY 우선.
-        if not inactive_emergency and (f.signal_quality < min_quality or f.heart_rate_bpm is None):
+        # 낙상 시퀀스 + 10초 무동작은 ECG 상태와 무관하게 EMERGENCY 우선.
+        if not fall_emergency and (f.signal_quality < min_quality or f.heart_rate_bpm is None):
             return Assessment(f.timestamp_ms, RiskLevel.SENSOR_CHECK, 0.0, r,
                               ["ECG 전극 또는 신호 품질 확인 필요"],
                               latitude=f.latitude, longitude=f.longitude)
@@ -462,14 +512,10 @@ class WorkerSafetyPipeline:
         if r.activity >= 50: reasons.append("비정상 활동 상태")
 
         emergency_rule = None
-        if inactive_emergency:
-            emergency_rule = "10초 이상 무동작"
-        elif f.fall_candidate and f.inactivity_sec >= thresholds["post_fall_inactivity_s"]:
-            emergency_rule = "낙상 후보 + 이후 무동작"
+        if fall_emergency:
+            emergency_rule = "자유낙하 + 충격 + 자세 변화 + 10초 무동작"
         elif r.ecg_anomaly >= 85 and corrected_heart >= 70:
             emergency_rule = "강한 ECG 이상 후보 + 높은 심박 위험"
-        elif r.fall_impact >= 95:
-            emergency_rule = "매우 큰 충격/낙상 위험"
 
         w = self.config["weights"]
         score = (
@@ -507,7 +553,7 @@ class WorkerSafetyPipeline:
         warning_elapsed = 0 if self._warning_since_ms is None else (now_ms - self._warning_since_ms) / 1000.0
         caution_elapsed = 0 if self._caution_since_ms is None else (now_ms - self._caution_since_ms) / 1000.0
 
-        if emergency_rule and (inactive_emergency or emergency_elapsed >= p["emergency"]):
+        if emergency_rule and (fall_emergency or emergency_elapsed >= p["emergency"]):
             level = RiskLevel.EMERGENCY
             reasons.append(f"긴급 규칙: {emergency_rule}")
         elif score >= 50 and warning_elapsed >= p["warning"]:
@@ -540,9 +586,14 @@ class WorkerSafetyPipeline:
             "imu": {"activity_g": round(f.activity_g, 3),
                     "posture_change_dps": round(f.posture_change_dps, 1),
                     "posture_angle_deg": round(f.posture_angle_deg, 1),
+                    "pitch_deg": round(f.pitch_deg, 1),
+                    "roll_deg": round(f.roll_deg, 1),
+                    "posture_delta_deg": round(f.posture_delta_deg, 1),
                     "impact_g": round(f.impact_g, 2),
                     "inactivity_sec": round(f.inactivity_sec, 1),
                     "free_fall_detected": f.free_fall_detected,
+                    "impact_detected": f.impact_detected,
+                    "posture_change_detected": f.posture_change_detected,
                     "fall_candidate": f.fall_candidate},
             "temperature": {"skin_temp_c": f.skin_temp_c,
                             "delta_c": f.temp_delta_c,
