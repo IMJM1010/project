@@ -6,7 +6,7 @@
     "gps_hz": 1
   },
   "weights": {
-    "heart": 0.30,
+    "heart": 0.20,
     "ecg_anomaly": 0.30,
     "temperature": 0.10,
     "fall_impact": 0.30,
