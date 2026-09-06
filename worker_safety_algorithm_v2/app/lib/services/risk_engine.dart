@@ -84,7 +84,7 @@ class RiskEngine {
     }
 
     var score =
-        heart * 0.30 +
+        heart * 0.20 +
         ecg * 0.30 +
         temperature * 0.10 +
         fallImpact * 0.30 +
