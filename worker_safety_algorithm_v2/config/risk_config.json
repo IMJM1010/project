@@ -24,8 +24,13 @@
     "emergency": 3
   },
   "prototype_thresholds": {
+    "free_fall_g": 0.8,
     "impact_g": 2.5,
-    "post_fall_inactivity_s": 8,
+    "posture_angle_deg": 60,
+    "fall_sequence_window_s": 0.7,
+    "posture_confirmation_s": 2.0,
+    "post_fall_inactivity_s": 10,
+    "inactivity_emergency_s": 10,
     "high_activity_g": 0.35,
     "low_activity_g": 0.08,
     "signal_quality_min": 0.35
