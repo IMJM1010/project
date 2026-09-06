@@ -317,12 +317,10 @@ class WorkerSafetyPipeline:
         thresholds = self.config["prototype_thresholds"]
         low_activity = thresholds["low_activity_g"]
 
-        # 첫 IMU 프레임부터 무동작 시간을 계산한다.
-        if self.last_motion_timestamp_ms is None:
-            self.last_motion_timestamp_ms = p.timestamp_ms
+        # 실제 움직임이 한 번 이상 감지된 뒤부터 무동작 시간을 누적한다.
         if activity_g > low_activity:
             self.last_motion_timestamp_ms = p.timestamp_ms
-        inactivity = max(
+        inactivity = 0.0 if self.last_motion_timestamp_ms is None else max(
             0.0, (p.timestamp_ms - self.last_motion_timestamp_ms) / 1000.0
         )
 
@@ -451,7 +449,9 @@ class WorkerSafetyPipeline:
                 reasons.append("높은 활동량을 고려해 심박 위험도 보정")
 
         context_bonus = 0.0
-        if f.heart_rate_bpm > self.baseline.heart_rate_bpm + 30 and f.activity_g < self.config["prototype_thresholds"]["low_activity_g"]:
+        if (f.heart_rate_bpm is not None
+                and f.heart_rate_bpm > self.baseline.heart_rate_bpm + 30
+                and f.activity_g < thresholds["low_activity_g"]):
             context_bonus += 12
             reasons.append("활동량이 낮은 상태에서 심박 상승")
 
