@@ -6,10 +6,10 @@
     "gps_hz": 1
   },
   "weights": {
-    "heart": 0.25,
+    "heart": 0.30,
     "ecg_anomaly": 0.30,
-    "temperature": 0.15,
-    "fall_impact": 0.20,
+    "temperature": 0.10,
+    "fall_impact": 0.30,
     "activity": 0.10
   },
   "levels": {
