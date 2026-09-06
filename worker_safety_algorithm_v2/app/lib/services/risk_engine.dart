@@ -84,10 +84,10 @@ class RiskEngine {
     }
 
     var score =
-        heart * 0.25 +
+        heart * 0.30 +
         ecg * 0.30 +
-        temperature * 0.15 +
-        fallImpact * 0.20 +
+        temperature * 0.10 +
+        fallImpact * 0.30 +
         activity * 0.10 +
         contextBonus;
     score = clip(score, 0, 100);
