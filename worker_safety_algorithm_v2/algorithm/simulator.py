@@ -66,10 +66,12 @@ def main():
         if n % fs == 0:
             print(
                 f"{sec:05.1f}s | HR={features.heart_rate_bpm!s:>7} | "
-                f"motion={features.activity_g:.2f}g | impact={features.impact_g:.2f}g | "
-                f"posture={features.posture_angle_deg:.1f}deg | inactive={features.inactivity_sec:.1f}s | "
-                f"fall={features.fall_candidate} | score={assessment.total_score:5.1f} | "
-                f"{assessment.level.value}"
+                f"motion={features.activity_g:.2f}g | SVM={features.impact_g:.2f}g | "
+                f"pitch={features.pitch_deg:.1f} | roll={features.roll_deg:.1f} | "
+                f"dPosture={features.posture_delta_deg:.1f} | inactive={features.inactivity_sec:.1f}s | "
+                f"FF={features.free_fall_detected} IMP={features.impact_detected} "
+                f"POST={features.posture_change_detected} FALL={features.fall_candidate} | "
+                f"score={assessment.total_score:5.1f} | {assessment.level.value}"
             )
 
 
