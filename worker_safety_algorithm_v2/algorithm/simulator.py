@@ -36,11 +36,17 @@ def main():
             temp = 35.7 + (sec - 15) * 0.02
         else:
             bpm = 118
-            if sec < 30.5:
+            if sec < 30.2:
+                # 자유낙하 후보: 합성가속도 < 0.8 g
+                ax, ay, az = 0.1, 0.1, 0.1
+                gyro = 100
+            elif sec < 30.5:
+                # 바닥 충격: 합성가속도 >= 2.5 g
                 ax, ay, az = 2.7, 0.6, 1.2
                 gyro = 180
             else:
-                ax, ay, az = 0.0, 0.0, 1.0
+                # 낙상 후 누운 자세: Z축 기준 약 90°, 이후 무동작
+                ax, ay, az = 1.0, 0.0, 0.0
                 gyro = 2
             temp = 36.1
 
@@ -61,7 +67,8 @@ def main():
             print(
                 f"{sec:05.1f}s | HR={features.heart_rate_bpm!s:>7} | "
                 f"motion={features.activity_g:.2f}g | impact={features.impact_g:.2f}g | "
-                f"inactive={features.inactivity_sec:.1f}s | score={assessment.total_score:5.1f} | "
+                f"posture={features.posture_angle_deg:.1f}deg | inactive={features.inactivity_sec:.1f}s | "
+                f"fall={features.fall_candidate} | score={assessment.total_score:5.1f} | "
                 f"{assessment.level.value}"
             )
 
