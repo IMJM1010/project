@@ -9,7 +9,15 @@ from typing import Callable
 from pipeline import WorkerSafetyPipeline, RawSensorFrame, PersonalBaseline, RiskLevel
 
 
-FS = 250
+ECG_HZ = 300
+IMU_HZ = 100
+TEMP_HZ = 15
+GPS_HZ = 1
+
+FS = ECG_HZ
+IMU_STEP = ECG_HZ // IMU_HZ
+TEMP_STEP = ECG_HZ // TEMP_HZ
+GPS_STEP = ECG_HZ // GPS_HZ
 BASELINE = PersonalBaseline(
     heart_rate_bpm=78,
     skin_temp_c=35.4,
@@ -276,21 +284,25 @@ def run_scenario(
             n, FS, s.bpm, rng, irregular=s.irregular_ecg
         )
 
+        imu_sample = (n % IMU_STEP == 0)
+        temp_sample = (n % TEMP_STEP == 0)
+        gps_sample = (n % GPS_STEP == 0)
+
         frame = RawSensorFrame(
             timestamp_ms=int(sec * 1000),
             ecg_raw=ecg_raw,
             lead_off=s.lead_off,
-            ax_g=s.ax,
-            ay_g=s.ay,
-            az_g=s.az,
-            gx_dps=s.gx,
-            gy_dps=s.gy,
-            gz_dps=s.gz,
-            skin_temp_c=s.temp if n % FS == 0 else None,
-            latitude=36.3504 if n % FS == 0 else None,
-            longitude=127.3845 if n % FS == 0 else None,
-            speed_mps=s.speed_mps,
-            gps_valid=(n % FS == 0),
+            ax_g=s.ax if imu_sample else None,
+            ay_g=s.ay if imu_sample else None,
+            az_g=s.az if imu_sample else None,
+            gx_dps=s.gx if imu_sample else None,
+            gy_dps=s.gy if imu_sample else None,
+            gz_dps=s.gz if imu_sample else None,
+            skin_temp_c=s.temp if temp_sample else None,
+            latitude=36.3504 if gps_sample else None,
+            longitude=127.3845 if gps_sample else None,
+            speed_mps=s.speed_mps if gps_sample else None,
+            gps_valid=gps_sample,
         )
 
         features, assessment = pipeline.process(frame)
@@ -441,9 +453,13 @@ def run_value_sweeps(seed: int) -> None:
                 RawSensorFrame(
                     timestamp_ms=int(n / FS * 1000),
                     ecg_raw=synthetic_ecg(n, FS, s.bpm, rng),
-                    ax_g=s.ax, ay_g=s.ay, az_g=s.az,
-                    gx_dps=s.gx, gy_dps=0, gz_dps=0,
-                    skin_temp_c=s.temp if n % FS == 0 else None,
+                    ax_g=s.ax if n % IMU_STEP == 0 else None,
+                    ay_g=s.ay if n % IMU_STEP == 0 else None,
+                    az_g=s.az if n % IMU_STEP == 0 else None,
+                    gx_dps=s.gx if n % IMU_STEP == 0 else None,
+                    gy_dps=0 if n % IMU_STEP == 0 else None,
+                    gz_dps=0 if n % IMU_STEP == 0 else None,
+                    skin_temp_c=s.temp if n % TEMP_STEP == 0 else None,
                 )
             )
         hr_risk = 0.0 if last_a is None else last_a.individual.heart
