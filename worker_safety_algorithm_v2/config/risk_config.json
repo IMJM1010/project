@@ -30,5 +30,55 @@
     "low_activity_g": 0.08,
     "signal_quality_min": 0.35
   },
-  "note": "프로젝트용 초기 임계값. 실측 데이터 및 전문가 검토 후 재보정 필요."
+  "environment_thresholds": {
+    "wbgt_c": {
+      "normal_lt": 26,
+      "caution_min": 26,
+      "caution_lt": 28,
+      "warning_min": 28,
+      "warning_lt": 30,
+      "danger_min": 30
+    },
+    "co2_ppm": {
+      "normal_lt": 1000,
+      "caution_min": 1000,
+      "caution_lt": 1500,
+      "warning_min": 1500,
+      "warning_lt": 2000,
+      "danger_min": 2000
+    },
+    "co_ppm": {
+      "normal_lt": 10,
+      "caution_min": 10,
+      "caution_lt": 25,
+      "warning_min": 25,
+      "warning_lt": 50,
+      "danger_min": 50
+    },
+    "pm25": {
+      "normal_lt": 15,
+      "caution_min": 15,
+      "caution_lt": 35,
+      "warning_min": 35,
+      "warning_lt": 75,
+      "danger_min": 75
+    },
+    "pm10": {
+      "normal_lt": 30,
+      "caution_min": 30,
+      "caution_lt": 80,
+      "warning_min": 80,
+      "warning_lt": 150,
+      "danger_min": 150
+    },
+    "tvoc_ppb": {
+      "normal_lt": 300,
+      "caution_min": 300,
+      "caution_lt": 500,
+      "warning_min": 500,
+      "warning_lt": 1000,
+      "danger_min": 1000
+    }
+  },
+  "note": "프로젝트용 초기 생체/동작 임계값은 실측 데이터 및 전문가 검토 후 재보정 필요. 환경 기준은 사용자 제공 4단계 기준표를 반영함."
 }
