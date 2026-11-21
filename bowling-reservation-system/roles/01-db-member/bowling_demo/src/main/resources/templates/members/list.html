@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>회원 목록</title>
+</head>
+<body>
+    <h1>회원 관리</h1>
+    <form th:action="@{/members}" method="get">
+        <input type="text" name="keyword" th:value="${keyword}" placeholder="이름 또는 연락처 검색">
+        <button type="submit">검색</button>
+        <a th:href="@{/members/new}">+ 신규 회원 등록</a>
+    </form>
+    <table border="1" style="margin-top:10px; border-collapse: collapse;">
+        <thead>
+            <tr>
+                <th>ID</th><th>이름</th><th>연락처</th><th>이메일</th><th>등급</th><th>가입일</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr th:each="m : ${members}">
+                <td th:text="${m.memberId}"></td>
+                <td><a th:href="@{/members/{id}(id=${m.memberId})}" th:text="${m.name}"></a></td>
+                <td th:text="${m.phone}"></td>
+                <td th:text="${m.email}"></td>
+                <td th:text="${m.grade}"></td>
+                <td th:text="${m.createdAt}"></td>
+            </tr>
+        </tbody>
+    </table>
+</body>
+</html>
