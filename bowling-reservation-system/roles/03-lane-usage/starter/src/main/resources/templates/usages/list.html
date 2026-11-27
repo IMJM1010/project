@@ -6,6 +6,7 @@
 <tr th:each="u : ${usages}"><td th:text="${u.usageId}"></td><td th:text="${u.reservationId}"></td><td th:text="|${u.laneNumber}번|"></td><td th:text="${u.memberName}"></td>
 <td th:text="${u.actualStartTime == null ? '-' : #temporals.format(u.actualStartTime,'yyyy-MM-dd HH:mm')}"></td>
 <td th:text="${u.actualEndTime == null ? '-' : #temporals.format(u.actualEndTime,'yyyy-MM-dd HH:mm')}"></td>
-<td th:text="${u.usageStatus}"></td><td><form th:if="${u.usageStatus == '이용중'}" method="post" th:action="@{/usages/{id}/end(id=${u.usageId})}"><button type="submit">이용 종료</button></form></td></tr>
+<td th:text="${u.usageStatus}"></td><td><form th:if="${u.usageStatus == 'IN_USE'}" method="post" th:action="@{/usages/{id}/end(id=${u.usageId})}"><button type="submit">이용 종료</button></form></td></tr>
 <tr th:if="${#lists.isEmpty(usages)}"><td colspan="8">아직 이용 기록이 없습니다.</td></tr>
 </tbody></table></div><footer>3번 담당 독립 개발 데모</footer></main></body></html>
+

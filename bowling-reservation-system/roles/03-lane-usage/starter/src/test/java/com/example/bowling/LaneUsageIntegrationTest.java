@@ -1,131 +1,34 @@
 package com.example.bowling;
-
-import com.example.bowling.repository.LaneRepository;
-import com.example.bowling.repository.UsageRepository;
-import com.example.bowling.service.BusinessException;
-import com.example.bowling.service.LaneService;
-import com.example.bowling.service.UsageService;
+import com.example.bowling.repository.*;
+import com.example.bowling.service.*;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.security.test.context.support.WithMockUser;
+import static org.assertj.core.api.Assertions.*;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
-/**
- * These tests run only against the isolated demo H2 database.
- * Never point them at the user's Oracle account.
- */
-@SpringBootTest
-@ActiveProfiles("demo")
-@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
+@SpringBootTest @ActiveProfiles("demo") @WithMockUser(roles="ADMIN")
+@DirtiesContext(classMode=DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
 class LaneUsageIntegrationTest {
-
-    @Autowired private LaneRepository laneRepository;
-    @Autowired private LaneService laneService;
-    @Autowired private UsageRepository usageRepository;
-    @Autowired private UsageService usageService;
-    @Autowired private JdbcTemplate jdbc;
-
-    private int count(String table) {
-        // Fixed trusted table names only, no user input.
-        return jdbc.queryForObject("SELECT COUNT(*) FROM " + table, Integer.class);
-    }
-
-    private String reservationStatus(long reservationId) {
-        return jdbc.queryForObject(
-            "SELECT reservation_status FROM RESERVATION WHERE reservation_id=?",
-            String.class, reservationId);
-    }
-
-    @Test void demoDataIsLoaded() {
-        assertThat(count("MEMBER")).isEqualTo(3);
-        assertThat(count("LANE")).isEqualTo(10);
-        assertThat(count("RESERVATION")).isEqualTo(3);
-        assertThat(count("RESERVATION_LANE")).isEqualTo(4);
-        assertThat(count("USAGE")).isEqualTo(1);
-        assertThat(laneRepository.findAll()).hasSize(10);
-        assertThat(laneRepository.findOne(9).laneStatus()).isEqualTo("점검중");
-        assertThat(laneRepository.schedules(2)).hasSize(1);
-    }
-
-    @Test void startAndFinishChangesReservationAndUsageTogether() {
-        long usageId = usageService.start(1001, 1);
-        assertThat(usageId).isGreaterThan(0);
-        assertThat(reservationStatus(1001)).isEqualTo("이용중");
-        assertThat(laneRepository.findOne(1).occupied()).isTrue();
-        assertThat(count("USAGE")).isEqualTo(2);
-        usageService.finish(usageId);
-        assertThat(reservationStatus(1001)).isEqualTo("이용완료");
-        assertThat(laneRepository.findOne(1).occupied()).isFalse();
-        assertThat(jdbc.queryForObject(
-            "SELECT actual_end_time FROM USAGE WHERE usage_id=?", java.sql.Timestamp.class,usageId))
-            .isNotNull();
-    }
-
-    @Test void aMultipleLaneReservationFinishesOnlyAfterAllLanesAreDone() {
-        long lane2Usage = usageService.start(1002, 2);
-        long lane3Usage = usageService.start(1002, 3);
-        usageService.finish(lane2Usage);
-        assertThat(reservationStatus(1002)).isEqualTo("이용중");
-        usageService.finish(lane3Usage);
-        assertThat(reservationStatus(1002)).isEqualTo("이용완료");
-    }
-
-    @Test void startingAUsageTwiceDoesNotInsertDuplicateRows() {
-        usageService.start(1001, 1);
-        assertThatThrownBy(() -> usageService.start(1001, 1))
-            .isInstanceOf(BusinessException.class);
-        assertThat(count("USAGE")).isEqualTo(2);
-    }
-
-    @Test void anUnassignedLaneCannotBeStarted() {
-        assertThatThrownBy(() -> usageService.start(1001, 2))
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("배정된 레인");
-        assertThat(count("USAGE")).isEqualTo(1);
-    }
-
-    @Test void aCompletedReservationCannotStartAgain() {
-        assertThatThrownBy(() -> usageService.start(1003, 4))
-            .isInstanceOf(BusinessException.class);
-    }
-
-    @Test void invalidFacilityStatusesAreRejected() {
-        assertThatThrownBy(() -> laneService.updateStatus(4,"고장"))
-            .isInstanceOf(BusinessException.class);
-    }
-
-    @Test void laneMaintenanceIsBlockedWhileCurrentBookingExists() {
-        assertThatThrownBy(() -> laneService.updateStatus(1,"점검중"))
-            .isInstanceOf(BusinessException.class);
-        assertThat(laneRepository.findOne(1).laneStatus()).isEqualTo("이용가능");
-    }
-
-    @Test void aLaneWithoutActiveOrFutureBookingCanBeMarkedForMaintenance() {
-        laneService.updateStatus(8,"점검중");
-        assertThat(laneRepository.findOne(8).laneStatus()).isEqualTo("점검중");
-    }
-
-    @Test void aNonBookableLaneCannotStartEvenIfAReservationWasAssignedToIt() {
-        // Deliberately insert an assignment that violates the application rule
-        // but not the ERD's FK constraint, to verify the service rejects it.
-        jdbc.update("""
-            INSERT INTO RESERVATION (reservation_id,member_id,start_time,end_time,person_count,reservation_status)
-            VALUES (1004,1,DATEADD('MINUTE',-10,CURRENT_TIMESTAMP()),
-                DATEADD('MINUTE',80,CURRENT_TIMESTAMP()),1,'예약확정')
-            """);
-        jdbc.update("INSERT INTO RESERVATION_LANE (reservation_id,lane_id) VALUES (1004,9)");
-        assertThatThrownBy(() -> usageService.start(1004,9))
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("이용가능");
-    }
-
-    @Test void completedUsageCannotBeEndedTwice() {
-        assertThatThrownBy(() -> usageService.finish(5001))
-            .isInstanceOf(BusinessException.class);
-    }
+ @Autowired LaneRepository lanes;@Autowired UsageRepository repo;@Autowired UsageService usage;@Autowired LaneService service;@Autowired JdbcTemplate jdbc;
+ private String status(long id){return repo.booking(id).status().name();}
+ @Test void initial(){assertThat(lanes.findAll()).hasSize(10);assertThat(lanes.findOne(9).laneStatus()).isEqualTo("MAINTENANCE");}
+ @Test void startEnd(){long id=usage.start(101);assertThat(status(1001)).isEqualTo("IN_USE");assertThat(lanes.findOne(1).occupied()).isTrue();usage.finish(id);assertThat(status(1001)).isEqualTo("COMPLETED");assertThat(lanes.findOne(1).laneStatus()).isEqualTo("AVAILABLE");}
+ @Test void multi(){long a=usage.start(102);long b=usage.start(103);usage.finish(a);assertThat(status(1002)).isEqualTo("IN_USE");usage.finish(b);assertThat(status(1002)).isEqualTo("COMPLETED");}
+ @Test void duplicate(){usage.start(101);assertThatThrownBy(()->usage.start(101)).isInstanceOf(BusinessException.class);assertThat(repo.byAssignment(101)).hasSize(1);}
+ @Test void unused(){long a=usage.start(102);usage.markUnused(103);usage.finish(a);assertThat(status(1002)).isEqualTo("COMPLETED");assertThat(repo.byAssignment(103)).isEmpty();}
+ @Test void allUnusedRollback(){assertThatThrownBy(()->usage.markUnused(101)).isInstanceOf(BusinessException.class);assertThat(repo.assignment(101).status().name()).isEqualTo("WAITING");}
+ @Test void completedCannotRestart(){assertThatThrownBy(()->usage.start(104)).isInstanceOf(BusinessException.class);}
+ @Test void completedCannotEndAgain(){assertThatThrownBy(()->usage.finish(5001)).isInstanceOf(BusinessException.class);}
+ @Test void maintenanceAndRestore(){service.markMaintenance(8);assertThat(lanes.findOne(8).laneStatus()).isEqualTo("MAINTENANCE");service.restoreLane(8);assertThat(lanes.findOne(8).laneStatus()).isEqualTo("AVAILABLE");}
+ @Test void reallocate(){var result=service.markMaintenance(1);assertThat(result.replaced()).isEqualTo(1);assertThat(repo.assignment(101).laneId()).isNotEqualTo(1);}
+ @Test void activeFailureEndsUsage(){long id=usage.start(101);service.markMaintenance(1);assertThat(repo.usage(id).end()).isNotNull();assertThat(lanes.findOne(1).laneStatus()).isEqualTo("MAINTENANCE");assertThat(repo.assignment(101).laneId()).isEqualTo(1);}
+ @Test void wholeFinish(){usage.start(102);usage.finishReservation(1002);assertThat(status(1002)).isEqualTo("COMPLETED");assertThat(repo.assignment(103).status().name()).isEqualTo("UNUSED");}
+ @Test void capacity(){usage.recordAttendance(1001,5);assertThatThrownBy(()->usage.start(101)).isInstanceOf(BusinessException.class);assertThat(repo.byAssignment(101)).isEmpty();}
+ @Test void addLane(){usage.start(101);usage.recordAttendance(1001,5);long id=usage.addLane(1001,5);assertThat(repo.usage(id).end()).isNull();assertThat(repo.assignments(1001)).hasSize(2);}
+ @Test void noShowCannotStart(){jdbc.update("UPDATE RESERVATION SET status='NO_SHOW' WHERE reservation_id=1001");assertThatThrownBy(()->usage.start(101)).isInstanceOf(BusinessException.class);}
+ @Test void failureKeepsAssignment(){jdbc.update("UPDATE LANE SET status='MAINTENANCE' WHERE lane_id<>1");var r=service.markMaintenance(1);assertThat(r.failedReservations()).contains(1001L);assertThat(status(1001)).isEqualTo("REALLOCATION_FAILED");assertThat(repo.assignment(101).laneId()).isEqualTo(1);}
 }

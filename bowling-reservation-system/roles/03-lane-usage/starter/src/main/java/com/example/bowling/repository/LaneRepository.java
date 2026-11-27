@@ -1,82 +1,44 @@
 package com.example.bowling.repository;
-
-import com.example.bowling.dto.LaneInfo;
-import com.example.bowling.dto.LaneSchedule;
+import com.example.bowling.dto.*;
+import com.example.bowling.service.BusinessException;
+import com.example.bowling.enums.LaneStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
-import java.util.List;
 import java.sql.Timestamp;
+import java.time.LocalDateTime;
+import java.util.List;
 
 @Repository
 public class LaneRepository {
-    private final JdbcTemplate jdbc;
-    public LaneRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
-
-    public List<LaneInfo> findAll() {
-        String sql = """
-            SELECT l.lane_id, l.lane_number, l.lane_status,
-                   CASE WHEN EXISTS (SELECT 1 FROM USAGE u WHERE u.lane_id=l.lane_id
-                     AND u.usage_status = ? AND u.actual_end_time IS NULL)
-                   THEN 1 ELSE 0 END AS occupied
-            FROM LANE l ORDER BY l.lane_number
-            """;
-        return jdbc.query(sql, (rs,i) -> new LaneInfo(rs.getLong("lane_id"),
-            rs.getInt("lane_number"), rs.getString("lane_status"),rs.getInt("occupied")==1),"이용중");
-    }
-
-    public LaneInfo findOne(long laneId) {
-        List<LaneInfo> items=jdbc.query("""
-            SELECT l.lane_id,l.lane_number,l.lane_status,
-                   CASE WHEN EXISTS (
-                       SELECT 1 FROM USAGE u WHERE u.lane_id=l.lane_id
-                         AND u.usage_status=? AND u.actual_end_time IS NULL
-                   ) THEN 1 ELSE 0 END AS occupied
-            FROM LANE l WHERE l.lane_id=?
-            """,(rs,i)->new LaneInfo(rs.getLong("lane_id"),rs.getInt("lane_number"),
-                rs.getString("lane_status"),rs.getInt("occupied")==1),"이용중",laneId);
-        if(items.isEmpty()) throw new com.example.bowling.service.BusinessException("존재하지 않는 레인입니다.");
-        return items.get(0);
-    }
-
-    public String lockStatus(long laneId) {
-        List<String> states=jdbc.query("SELECT lane_status FROM LANE WHERE lane_id=? FOR UPDATE",
-                (rs,i)->rs.getString(1),laneId);
-        if(states.isEmpty()) throw new com.example.bowling.service.BusinessException("존재하지 않는 레인입니다.");
-        return states.get(0);
-    }
-
-    public int countActiveUsage(long laneId) {
-        Integer n=jdbc.queryForObject("SELECT COUNT(*) FROM USAGE WHERE lane_id=? AND usage_status=? AND actual_end_time IS NULL",
-                Integer.class,laneId,"이용중");
-        return n==null?0:n;
-    }
-
-    public int countFutureBookings(long laneId) {
-        Integer n=jdbc.queryForObject("""
-           SELECT COUNT(*) FROM RESERVATION_LANE rl
-           JOIN RESERVATION r ON r.reservation_id=rl.reservation_id
-           WHERE rl.lane_id=? AND r.end_time > ? AND r.reservation_status <> ?
-           """, Integer.class, laneId, Timestamp.valueOf(java.time.LocalDateTime.now()), "취소");
-        return n==null?0:n;
-    }
-
-    public int setStatus(long laneId,String newStatus) {
-        return jdbc.update("UPDATE LANE SET lane_status=? WHERE lane_id=?",newStatus,laneId);
-    }
-
-    public List<LaneSchedule> schedules(long laneId) {
-        String sql="""
-            SELECT r.reservation_id,m.name member_name,r.start_time,r.end_time,
-                   r.reservation_status,u.usage_status
-            FROM RESERVATION_LANE rl
-            JOIN RESERVATION r ON r.reservation_id=rl.reservation_id
-            JOIN MEMBER m ON m.member_id=r.member_id
-            LEFT JOIN USAGE u ON u.reservation_id=rl.reservation_id AND u.lane_id=rl.lane_id
-            WHERE rl.lane_id=? ORDER BY r.start_time DESC FETCH FIRST 30 ROWS ONLY
-            """;
-        return jdbc.query(sql,(rs,i)->new LaneSchedule(rs.getLong("reservation_id"),
-                rs.getString("member_name"),rs.getTimestamp("start_time").toLocalDateTime(),
-                rs.getTimestamp("end_time").toLocalDateTime(),
-                rs.getString("reservation_status"),rs.getString("usage_status")),laneId);
-    }
+ private final JdbcTemplate jdbc;
+ public LaneRepository(JdbcTemplate jdbc){this.jdbc=jdbc;}
+ private static final String SELECT="SELECT lane_id,lane_number,status,updated_at FROM LANE";
+ private LaneInfo map(java.sql.ResultSet rs,int i) throws java.sql.SQLException {
+  String s=rs.getString("status");
+  return new LaneInfo(rs.getLong("lane_id"),rs.getInt("lane_number"),s,"IN_USE".equals(s),rs.getTimestamp("updated_at").toLocalDateTime());
+ }
+ public List<LaneInfo> findAll(){return jdbc.query(SELECT+" ORDER BY lane_number",this::map);}
+ public LaneInfo findOne(long id){return jdbc.query(SELECT+" WHERE lane_id=?",this::map,id).stream().findFirst().orElseThrow(()->new BusinessException("존재하지 않는 레인입니다."));}
+ // All scheduling writers must acquire this same lock in this same order.
+ public void lockAll(){
+  List<Long> ids=jdbc.query("SELECT lane_id FROM LANE ORDER BY lane_id",(rs,i)->rs.getLong(1));
+  if(ids.size()!=10) throw new BusinessException("레인 초기 데이터 10개를 확인하세요.");
+  for(long id:ids) jdbc.queryForObject("SELECT lane_id FROM LANE WHERE lane_id=? FOR UPDATE",Long.class,id);
+ }
+ public int countActiveUsage(long id){return jdbc.queryForObject("""
+ SELECT COUNT(*) FROM USAGE u JOIN RESERVATION_LANE rl ON rl.reservation_lane_id=u.reservation_lane_id
+ WHERE rl.lane_id=? AND u.actual_end_time IS NULL
+ """,Integer.class,id);}
+ public void setStatus(long id,LaneStatus status,LocalDateTime now){
+  if(jdbc.update("UPDATE LANE SET status=?,updated_at=? WHERE lane_id=?",status.name(),Timestamp.valueOf(now),id)!=1)
+   throw new BusinessException("레인 상태 변경 실패");
+ }
+ public List<LaneSchedule> schedules(long id){
+  return jdbc.query("""
+  SELECT rl.reservation_lane_id,r.reservation_id,m.member_name,rl.assigned_start_time,r.reservation_end_time,r.status,rl.usage_status,r.person_count,r.actual_person_count
+  FROM RESERVATION_LANE rl JOIN RESERVATION r ON r.reservation_id=rl.reservation_id
+  JOIN MEMBER m ON m.member_id=r.member_id WHERE rl.lane_id=?
+  ORDER BY rl.assigned_start_time DESC FETCH FIRST 30 ROWS ONLY
+  """,(rs,i)->new LaneSchedule(rs.getLong(1),rs.getLong(2),rs.getString(3),rs.getTimestamp(4).toLocalDateTime(),rs.getTimestamp(5).toLocalDateTime(),rs.getString(6),rs.getString(7),rs.getInt(8),(Integer)rs.getObject(9,Integer.class)),id);
+ }
 }

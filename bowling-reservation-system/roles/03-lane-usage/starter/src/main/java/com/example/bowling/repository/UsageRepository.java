@@ -1,8 +1,7 @@
 package com.example.bowling.repository;
-
 import com.example.bowling.dto.UsageInfo;
+import com.example.bowling.enums.*;
 import com.example.bowling.service.BusinessException;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import java.sql.Timestamp;
@@ -11,100 +10,67 @@ import java.util.List;
 
 @Repository
 public class UsageRepository {
-    private final JdbcTemplate jdbc;
-    private final String sequenceSql;
-    public UsageRepository(JdbcTemplate jdbc,@Value("${bowling.usage.id-sql}") String sequenceSql) {
-        this.jdbc=jdbc; this.sequenceSql=sequenceSql;
-    }
-
-    public record ReservationInfo(String status, LocalDateTime start,LocalDateTime end) {}
-    public record UsageState(long usageId,long reservationId,long laneId,String status,LocalDateTime start) {}
-
-    public ReservationInfo lockReservation(long reservationId) {
-        List<ReservationInfo> list=jdbc.query("SELECT reservation_status,start_time,end_time FROM RESERVATION WHERE reservation_id=? FOR UPDATE",
-            (rs,i)->new ReservationInfo(rs.getString(1),rs.getTimestamp(2).toLocalDateTime(),
-                                         rs.getTimestamp(3).toLocalDateTime()),reservationId);
-        if(list.isEmpty()) throw new BusinessException("존재하지 않는 예약입니다.");
-        return list.get(0);
-    }
-
-    public boolean hasAssignment(long reservationId,long laneId) {
-        Integer count=jdbc.queryForObject("SELECT COUNT(*) FROM RESERVATION_LANE WHERE reservation_id=? AND lane_id=?",
-            Integer.class,reservationId,laneId);
-        return count!=null && count>0;
-    }
-
-    public List<UsageState> findByAssignment(long reservationId,long laneId) {
-        return jdbc.query("SELECT usage_id,reservation_id,lane_id,usage_status,actual_start_time FROM USAGE WHERE reservation_id=? AND lane_id=?",
-            (rs,i)->new UsageState(rs.getLong(1),rs.getLong(2),rs.getLong(3),rs.getString(4),
-                 rs.getTimestamp(5)==null?null:rs.getTimestamp(5).toLocalDateTime()),reservationId,laneId);
-    }
-
-    // Non-locking lookup: use only to identify which lane/reservation to lock first.
-    public UsageState findState(long usageId) {
-        List<UsageState> items=jdbc.query(
-            "SELECT usage_id,reservation_id,lane_id,usage_status,actual_start_time FROM USAGE WHERE usage_id=?",
-            (rs,i)->new UsageState(rs.getLong(1),rs.getLong(2),rs.getLong(3),rs.getString(4),
-                    rs.getTimestamp(5)==null?null:rs.getTimestamp(5).toLocalDateTime()),usageId);
-        if(items.isEmpty()) throw new BusinessException("이용 기록이 없습니다.");
-        return items.get(0);
-    }
-
-    public UsageState lockUsage(long usageId) {
-        List<UsageState> items=jdbc.query("SELECT usage_id,reservation_id,lane_id,usage_status,actual_start_time FROM USAGE WHERE usage_id=? FOR UPDATE",
-            (rs,i)->new UsageState(rs.getLong(1),rs.getLong(2),rs.getLong(3),rs.getString(4),
-                    rs.getTimestamp(5)==null?null:rs.getTimestamp(5).toLocalDateTime()),usageId);
-        if(items.isEmpty()) throw new BusinessException("이용 기록이 없습니다.");
-        return items.get(0);
-    }
-
-    public long create(long reservationId,long laneId,LocalDateTime now) {
-        Long id=jdbc.queryForObject(sequenceSql,Long.class);
-        if(id==null) throw new BusinessException("이용 기록번호를 발급하지 못했습니다.");
-        jdbc.update("INSERT INTO USAGE(usage_id,reservation_id,lane_id,actual_start_time,actual_end_time,usage_status) VALUES(?,?,?,?,?,?)",
-                id,reservationId,laneId,Timestamp.valueOf(now),null,"이용중");
-        return id;
-    }
-
-    public long beginWaiting(long usageId,LocalDateTime now) {
-        int n=jdbc.update("UPDATE USAGE SET actual_start_time=?,actual_end_time=NULL,usage_status=? WHERE usage_id=? AND usage_status=?",
-                Timestamp.valueOf(now),"이용중",usageId,"대기");
-        if(n!=1) throw new BusinessException("대기 기록을 시작 상태로 변경하지 못했습니다.");
-        return usageId;
-    }
-
-    public void finish(long usageId,LocalDateTime now) {
-        int n=jdbc.update("UPDATE USAGE SET actual_end_time=?,usage_status=? WHERE usage_id=? AND usage_status=? AND actual_start_time < ?",
-                Timestamp.valueOf(now),"이용완료",usageId,"이용중",Timestamp.valueOf(now));
-        if(n!=1) throw new BusinessException("이용 종료가 불가능합니다. 이용 상태와 시간을 확인하세요.");
-    }
-
-    public void updateReservationStatus(long reservationId,String status) {
-        jdbc.update("UPDATE RESERVATION SET reservation_status=? WHERE reservation_id=?",status,reservationId);
-    }
-
-    public int countUnfinishedAssignments(long reservationId) {
-        Integer n=jdbc.queryForObject("""
-            SELECT COUNT(*) FROM RESERVATION_LANE rl
-            LEFT JOIN USAGE u ON u.reservation_id=rl.reservation_id AND u.lane_id=rl.lane_id
-            WHERE rl.reservation_id=? AND (u.usage_id IS NULL OR u.usage_status <> ?)
-            """,Integer.class,reservationId,"이용완료");
-        return n==null?0:n;
-    }
-
-    public List<UsageInfo> listAll() {
-        String sql="""
-            SELECT u.usage_id,u.reservation_id,u.lane_id,l.lane_number,m.name member_name,
-                   u.actual_start_time,u.actual_end_time,u.usage_status
-            FROM USAGE u JOIN LANE l ON l.lane_id=u.lane_id
-            JOIN RESERVATION r ON r.reservation_id=u.reservation_id
-            JOIN MEMBER m ON m.member_id=r.member_id
-            ORDER BY u.usage_id DESC FETCH FIRST 100 ROWS ONLY
-            """;
-        return jdbc.query(sql,(rs,i)->new UsageInfo(rs.getLong("usage_id"),rs.getLong("reservation_id"),
-            rs.getLong("lane_id"),rs.getInt("lane_number"),rs.getString("member_name"),
-            rs.getTimestamp("actual_start_time")==null?null:rs.getTimestamp("actual_start_time").toLocalDateTime(),
-            rs.getTimestamp("actual_end_time")==null?null:rs.getTimestamp("actual_end_time").toLocalDateTime(),
-            rs.getString("usage_status")));
-    }
+ private final JdbcTemplate jdbc;
+ public UsageRepository(JdbcTemplate jdbc){this.jdbc=jdbc;}
+ public record Booking(long id,long memberId,ReservationStatus status,LocalDateTime start,LocalDateTime end,int people,Integer actual){}
+ public record Assignment(long id,long reservationId,long laneId,LocalDateTime start,ReservationLaneStatus status){}
+ public record UsageState(long id,long assignmentId,LocalDateTime start,LocalDateTime end){}
+ private static Timestamp ts(LocalDateTime t){return Timestamp.valueOf(t);}
+ private static LocalDateTime dt(java.sql.ResultSet rs,int i)throws java.sql.SQLException{Timestamp t=rs.getTimestamp(i);return t==null?null:t.toLocalDateTime();}
+ private static <T>T one(List<T> l,String message){return l.stream().findFirst().orElseThrow(()->new BusinessException(message));}
+ public Booking booking(long id){
+  return one(jdbc.query("SELECT reservation_id,member_id,status,reservation_start_time,reservation_end_time,person_count,actual_person_count FROM RESERVATION WHERE reservation_id=?",
+   (rs,i)->new Booking(rs.getLong(1),rs.getLong(2),ReservationStatus.valueOf(rs.getString(3)),dt(rs,4),dt(rs,5),rs.getInt(6),rs.getObject(7,Integer.class)),id),"예약이 없습니다.");
+ }
+ public Booking lockBooking(long id){
+  Booking b=booking(id);
+  jdbc.queryForObject("SELECT member_id FROM MEMBER WHERE member_id=? FOR UPDATE",Long.class,b.memberId());
+  jdbc.queryForObject("SELECT reservation_id FROM RESERVATION WHERE reservation_id=? FOR UPDATE",Long.class,id);
+  return booking(id);
+ }
+ private Assignment assignmentRow(java.sql.ResultSet rs,int i)throws java.sql.SQLException{
+  return new Assignment(rs.getLong(1),rs.getLong(2),rs.getLong(3),dt(rs,4),ReservationLaneStatus.valueOf(rs.getString(5)));
+ }
+ private static final String A="SELECT reservation_lane_id,reservation_id,lane_id,assigned_start_time,usage_status FROM RESERVATION_LANE";
+ public Assignment assignment(long id){return one(jdbc.query(A+" WHERE reservation_lane_id=?",this::assignmentRow,id),"배정된 레인이 아닙니다.");}
+ public Assignment assignment(long reservation,long lane){return one(jdbc.query(A+" WHERE reservation_id=? AND lane_id=?",this::assignmentRow,reservation,lane),"배정된 레인이 아닙니다.");}
+ public List<Assignment> assignments(long reservation){return jdbc.query(A+" WHERE reservation_id=? ORDER BY reservation_lane_id",this::assignmentRow,reservation);}
+ public List<Assignment> pendingOnLane(long lane,LocalDateTime now){return jdbc.query("""
+ SELECT rl.reservation_lane_id,rl.reservation_id,rl.lane_id,rl.assigned_start_time,rl.usage_status
+ FROM RESERVATION_LANE rl JOIN RESERVATION r ON r.reservation_id=rl.reservation_id
+ WHERE rl.lane_id=? AND rl.usage_status='WAITING' AND r.status IN ('CONFIRMED','IN_USE','REALLOCATION_FAILED')
+ AND r.reservation_end_time>? ORDER BY rl.assigned_start_time,rl.reservation_lane_id
+ """,this::assignmentRow,lane,ts(now));}
+ public List<UsageState> byAssignment(long id){return jdbc.query("SELECT usage_id,reservation_lane_id,actual_start_time,actual_end_time FROM USAGE WHERE reservation_lane_id=?",(rs,i)->new UsageState(rs.getLong(1),rs.getLong(2),dt(rs,3),dt(rs,4)),id);}
+ public UsageState usage(long id){return one(jdbc.query("SELECT usage_id,reservation_lane_id,actual_start_time,actual_end_time FROM USAGE WHERE usage_id=?",(rs,i)->new UsageState(rs.getLong(1),rs.getLong(2),dt(rs,3),dt(rs,4)),id),"이용 기록이 없습니다.");}
+ public long create(long assignmentId,LocalDateTime now){
+  jdbc.update("INSERT INTO USAGE(reservation_lane_id,actual_start_time) VALUES(?,?)",assignmentId,ts(now));
+  return byAssignment(assignmentId).get(0).id();
+ }
+ public void finish(long id,LocalDateTime now){
+  if(jdbc.update("UPDATE USAGE SET actual_end_time=? WHERE usage_id=? AND actual_end_time IS NULL AND actual_start_time<=?",ts(now),id,ts(now))!=1)
+   throw new BusinessException("이미 종료되었거나 종료시간이 올바르지 않습니다.");
+ }
+ public void state(long assignmentId,ReservationLaneStatus s){jdbc.update("UPDATE RESERVATION_LANE SET usage_status=? WHERE reservation_lane_id=?",s.name(),assignmentId);}
+ public void bookingState(long id,ReservationStatus s,LocalDateTime now){jdbc.update("UPDATE RESERVATION SET status=?,updated_at=? WHERE reservation_id=?",s.name(),ts(now),id);}
+ public void attendance(long id,int n,LocalDateTime now){jdbc.update("UPDATE RESERVATION SET actual_person_count=?,updated_at=? WHERE reservation_id=?",n,ts(now),id);}
+ public void extend(long id,LocalDateTime end,LocalDateTime now){jdbc.update("UPDATE RESERVATION SET reservation_end_time=?,updated_at=? WHERE reservation_id=?",ts(end),ts(now),id);}
+ public void move(long assignmentId,long lane){jdbc.update("UPDATE RESERVATION_LANE SET lane_id=? WHERE reservation_lane_id=? AND usage_status='WAITING'",lane,assignmentId);}
+ public Assignment add(long reservation,long lane,LocalDateTime now){
+  jdbc.update("INSERT INTO RESERVATION_LANE(reservation_id,lane_id,assigned_start_time,usage_status) VALUES(?,?,?,'WAITING')",reservation,lane,ts(now));
+  return assignment(reservation,lane);
+ }
+ public boolean conflict(long lane,LocalDateTime start,LocalDateTime end,long excludedReservation){
+  return jdbc.queryForObject("""
+  SELECT COUNT(*) FROM RESERVATION_LANE rl JOIN RESERVATION r ON r.reservation_id=rl.reservation_id
+  WHERE rl.lane_id=? AND r.reservation_id<>? AND r.status IN ('CONFIRMED','IN_USE','COMPLETED','REALLOCATION_FAILED')
+  AND rl.assigned_start_time<? AND r.reservation_end_time>?
+  """,Integer.class,lane,excludedReservation,ts(end),ts(start))>0;
+ }
+ public List<UsageInfo> listAll(){return jdbc.query("""
+ SELECT u.usage_id,rl.reservation_lane_id,r.reservation_id,l.lane_id,l.lane_number,m.member_name,u.actual_start_time,u.actual_end_time,rl.usage_status
+ FROM USAGE u JOIN RESERVATION_LANE rl ON rl.reservation_lane_id=u.reservation_lane_id JOIN LANE l ON l.lane_id=rl.lane_id
+ JOIN RESERVATION r ON r.reservation_id=rl.reservation_id JOIN MEMBER m ON m.member_id=r.member_id
+ ORDER BY u.usage_id DESC FETCH FIRST 100 ROWS ONLY
+ """,(rs,i)->new UsageInfo(rs.getLong(1),rs.getLong(2),rs.getLong(3),rs.getLong(4),rs.getInt(5),rs.getString(6),dt(rs,7),dt(rs,8),rs.getString(9)));}
 }
