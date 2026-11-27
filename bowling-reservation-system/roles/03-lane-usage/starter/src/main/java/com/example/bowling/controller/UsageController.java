@@ -19,5 +19,6 @@ public class UsageController {
  @PostMapping("/attendance") public String attendance(@RequestParam long reservationId,@RequestParam int actualPersonCount,@RequestParam long laneId,RedirectAttributes r){return action(()->service.recordAttendance(reservationId,actualPersonCount),"/lanes/"+laneId,r);}
  @PostMapping("/finish-reservation") public String finish(@RequestParam long reservationId,@RequestParam long laneId,RedirectAttributes r){return action(()->service.finishReservation(reservationId),"/lanes/"+laneId,r);}
  @PostMapping("/extend") public String extend(@RequestParam long reservationId,@RequestParam int minutes,@RequestParam long laneId,RedirectAttributes r){return action(()->service.extendReservation(reservationId,minutes),"/lanes/"+laneId,r);}
+ @PostMapping("/assign-lane") public String assign(@RequestParam long reservationId,@RequestParam long newLaneId,@RequestParam long laneId,RedirectAttributes r){return action(()->service.assignAdditionalLane(reservationId,newLaneId),"/lanes/"+laneId,r);}
  @PostMapping("/add-lane") public String add(@RequestParam long reservationId,@RequestParam long newLaneId,@RequestParam long laneId,RedirectAttributes r){return action(()->service.addLane(reservationId,newLaneId),"/lanes/"+laneId,r);}
 }

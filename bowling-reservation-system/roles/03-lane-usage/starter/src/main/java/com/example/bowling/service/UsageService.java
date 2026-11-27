@@ -83,6 +83,13 @@ public class UsageService {
   }
   repo.extend(id,end,n);
  }
+ @Transactional public long assignAdditionalLane(long id,long laneId){
+  lanes.lockAll();Booking b=repo.lockBooking(id);usable(b);LocalDateTime n=now();window(b,n);
+  if(b.status()!=ReservationStatus.CONFIRMED||!n.isBefore(b.end()))throw new BusinessException("이용 시작 전 확정 예약만 배정할 수 있습니다.");
+  if(repo.assignments(id).stream().anyMatch(a->a.laneId()==laneId))throw new BusinessException("이미 배정된 레인입니다.");
+  if(!lanes.findOne(laneId).laneStatus().equals("AVAILABLE")||lanes.countActiveUsage(laneId)>0||repo.conflict(laneId,n,b.end(),id))throw new BusinessException("추가할 수 없는 레인입니다.");
+  return repo.add(id,laneId,n).id();
+ }
  @Transactional public long addLane(long id,long laneId){
   lanes.lockAll();Booking b=repo.lockBooking(id);usable(b);LocalDateTime n=now();window(b,n);
   if(b.status()!=ReservationStatus.IN_USE||!n.isBefore(b.end()))throw new BusinessException("이용 중 예약에만 추가할 수 있습니다.");

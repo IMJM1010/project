@@ -43,6 +43,13 @@ public class UsageRepository {
  """,this::assignmentRow,lane,ts(now));}
  public List<UsageState> byAssignment(long id){return jdbc.query("SELECT usage_id,reservation_lane_id,actual_start_time,actual_end_time FROM USAGE WHERE reservation_lane_id=?",(rs,i)->new UsageState(rs.getLong(1),rs.getLong(2),dt(rs,3),dt(rs,4)),id);}
  public UsageState usage(long id){return one(jdbc.query("SELECT usage_id,reservation_lane_id,actual_start_time,actual_end_time FROM USAGE WHERE usage_id=?",(rs,i)->new UsageState(rs.getLong(1),rs.getLong(2),dt(rs,3),dt(rs,4)),id),"이용 기록이 없습니다.");}
+ public UsageState activeOnLane(long lane){
+  return one(jdbc.query("""
+   SELECT u.usage_id,u.reservation_lane_id,u.actual_start_time,u.actual_end_time
+   FROM USAGE u JOIN RESERVATION_LANE rl ON rl.reservation_lane_id=u.reservation_lane_id
+   WHERE rl.lane_id=? AND u.actual_end_time IS NULL
+   """,(rs,i)->new UsageState(rs.getLong(1),rs.getLong(2),dt(rs,3),dt(rs,4)),lane),"진행 중 이용 기록이 없습니다.");
+ }
  public long create(long assignmentId,LocalDateTime now){
   jdbc.update("INSERT INTO USAGE(reservation_lane_id,actual_start_time) VALUES(?,?)",assignmentId,ts(now));
   return byAssignment(assignmentId).get(0).id();

@@ -18,6 +18,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class LaneUsageWebTest {
     @Autowired private MockMvc mockMvc;
 
+    @Test
+    @org.springframework.security.test.context.support.WithMockUser(roles="MEMBER")
+    void memberCannotAccessManagement() throws Exception {
+        mockMvc.perform(get("/lanes")).andExpect(status().isForbidden());
+    }
     @Test void lanesPageLoads() throws Exception {
         mockMvc.perform(get("/lanes"))
             .andExpect(status().isOk())

@@ -8,3 +8,5 @@
 - This change has not been built or tested against actual Oracle or H2 in this environment. Run tests before merging. Older docs describe the pre-v1.5 starter; use this document and new SQL as the branch baseline.
 - Remaining: team agreement about reallocation for partially used booking, repair recovery, start/attendance and extension rules, no-show allocation, closing, production auth, migration of existing data, integration and concurrent load tests.
 
+
+- If arrivals exceed capacity before the first usage, confirm attendance and add WAITING assignments using /usages/assign-lane; once capacity is sufficient, start usage. In-use additional lanes are assigned and started together.

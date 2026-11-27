@@ -18,8 +18,7 @@ public class LaneService {
   lanes.lockAll();String status=lanes.findOne(id).laneStatus();LocalDateTime n=UsageService.now();
   if(status.equals("IN_USE")){
    // Active assignment is never rewritten. End its real usage first.
-   UsageRepository.UsageState u=repo.listAll().stream().filter(x->x.laneId()==id&&x.actualEndTime()==null).findFirst()
-    .map(x->repo.usage(x.usageId())).orElseThrow(()->new BusinessException("진행 중 이용 기록을 확인하세요."));
+   UsageRepository.UsageState u=repo.activeOnLane(id);
    Assignment a=repo.assignment(u.assignmentId());repo.lockBooking(a.reservationId());usage.finishInternal(u,a,n);usage.refresh(a.reservationId(),n);
   } else if(lanes.countActiveUsage(id)>0)throw new BusinessException("레인과 이용 상태 불일치");
   lanes.setStatus(id,LaneStatus.MAINTENANCE,n);
