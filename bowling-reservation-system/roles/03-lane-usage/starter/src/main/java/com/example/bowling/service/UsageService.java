@@ -17,19 +17,20 @@ public class UsageService {
  private final LaneRepository lanes;
  private final boolean enforceWindow;
  private final int openHour;
- public UsageService(UsageRepository repo,LaneRepository lanes,@Value("${bowling.usage.enforce-time-window:true}") boolean enforceWindow,@Value("${bowling.business.open-hour:14}") int openHour){this.repo=repo;this.lanes=lanes;this.enforceWindow=enforceWindow;this.openHour=openHour;}
- static LocalDateTime now(){return LocalDateTime.now(ZoneId.of("Asia/Seoul"));}
+ private final Clock clock;
+ public UsageService(UsageRepository repo,LaneRepository lanes,@Value("${bowling.usage.enforce-time-window:true}") boolean enforceWindow,@Value("${bowling.business.open-hour:13}") int openHour,Clock clock){this.repo=repo;this.lanes=lanes;this.enforceWindow=enforceWindow;this.openHour=openHour;this.clock=clock;}
+ LocalDateTime now(){return LocalDateTime.now(clock.withZone(ZoneId.of("Asia/Seoul")));}
  private void usable(Booking b){if(b.status()!=ReservationStatus.CONFIRMED && b.status()!=ReservationStatus.IN_USE)throw new BusinessException("확정 또는 이용 중인 예약만 처리할 수 있습니다.");}
  private void window(Booking b,LocalDateTime n){
   if(enforceWindow && (n.isBefore(b.start()) || !n.isBefore(b.end())))throw new BusinessException("예약 시작부터 종료 전까지만 이용할 수 있습니다.");
  }
- private int capacity(long id){return (int)repo.assignments(id).stream().filter(a->a.status()==WAITING||a.status()==IN_USE).count()*4;}
+ private int capacity(long id){return (int)repo.assignments(id).stream().filter(a->a.status()!=UNUSED).count()*4;}
  @Transactional public void recordAttendance(long reservationId,int actual){
   lanes.lockAll();Booking b=repo.lockBooking(reservationId);usable(b);
   if(actual<1||actual>40)throw new BusinessException("실제 방문 인원은 1~40명이어야 합니다.");
   repo.attendance(reservationId,actual,now());
  }
- @Transactional public long start(long assignmentId){
+ @Transactional public long startUsage(long assignmentId){
   lanes.lockAll();Assignment a=repo.assignment(assignmentId);Booking b=repo.lockBooking(a.reservationId());usable(b);
   LocalDateTime n=now();window(b,n);
   if(b.actual()==null||b.actual()<1)throw new BusinessException("실제 방문 인원을 먼저 확인하세요.");
@@ -44,7 +45,7 @@ public class UsageService {
   long id=repo.create(a.id(),n);lanes.setStatus(a.laneId(),LaneStatus.IN_USE,n);
   repo.state(a.id(),IN_USE);repo.bookingState(b.id(),ReservationStatus.IN_USE,n);return id;
  }
- @Transactional public void finish(long usageId){
+ @Transactional public void endUsage(long usageId){
   lanes.lockAll();UsageState u=repo.usage(usageId);Assignment a=repo.assignment(u.assignmentId());repo.lockBooking(a.reservationId());
   finishInternal(u,a,now());refresh(a.reservationId(),now());
  }
@@ -78,6 +79,7 @@ public class UsageService {
   if(b.status()!=ReservationStatus.IN_USE||minutes<=0||minutes>120||!n.isBefore(b.end()))throw new BusinessException("이용 중 예약만 종료 전 1~120분 연장할 수 있습니다.");
   LocalDateTime end=b.end().plusMinutes(minutes),close=b.start().toLocalDate().plusDays(1).atStartOfDay();
   if(b.start().getHour()<openHour||end.isAfter(close))throw new BusinessException("영업시간을 초과합니다.");
+  if(repo.memberConflict(b.memberId(),b.end(),end,id))throw new BusinessException("회원의 다른 예약과 시간이 중복됩니다.");
   for(Assignment a:repo.assignments(id)){
    if(lanes.findOne(a.laneId()).laneStatus().equals("MAINTENANCE")||repo.conflict(a.laneId(),b.end(),end,id))throw new BusinessException("점검 또는 다음 예약과 충돌하여 전체 연장할 수 없습니다.");
   }
@@ -85,14 +87,14 @@ public class UsageService {
  }
  @Transactional public long assignAdditionalLane(long id,long laneId){
   lanes.lockAll();Booking b=repo.lockBooking(id);usable(b);LocalDateTime n=now();window(b,n);
-  if(b.status()!=ReservationStatus.CONFIRMED||!n.isBefore(b.end()))throw new BusinessException("이용 시작 전 확정 예약만 배정할 수 있습니다.");
+  if(b.status()!=ReservationStatus.CONFIRMED||!n.isBefore(b.end())||n.isBefore(b.start()))throw new BusinessException("이용 시작 전 확정 예약만 배정할 수 있습니다.");
   if(repo.assignments(id).stream().anyMatch(a->a.laneId()==laneId))throw new BusinessException("이미 배정된 레인입니다.");
   if(!lanes.findOne(laneId).laneStatus().equals("AVAILABLE")||lanes.countActiveUsage(laneId)>0||repo.conflict(laneId,n,b.end(),id))throw new BusinessException("추가할 수 없는 레인입니다.");
   return repo.add(id,laneId,n).id();
  }
  @Transactional public long addLane(long id,long laneId){
   lanes.lockAll();Booking b=repo.lockBooking(id);usable(b);LocalDateTime n=now();window(b,n);
-  if(b.status()!=ReservationStatus.IN_USE||!n.isBefore(b.end()))throw new BusinessException("이용 중 예약에만 추가할 수 있습니다.");
+  if(b.status()!=ReservationStatus.IN_USE||!n.isBefore(b.end())||n.isBefore(b.start()))throw new BusinessException("이용 중 예약에만 추가할 수 있습니다.");
   if(repo.assignments(id).stream().anyMatch(a->a.laneId()==laneId))throw new BusinessException("이미 배정된 레인입니다.");
   if(!lanes.findOne(laneId).laneStatus().equals("AVAILABLE")||lanes.countActiveUsage(laneId)>0||repo.conflict(laneId,n,b.end(),id))throw new BusinessException("추가할 수 없는 레인입니다.");
   return begin(repo.add(id,laneId,n),b,n);

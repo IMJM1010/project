@@ -11,8 +11,8 @@ import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 public class LaneController {
  private final LaneRepository lanes;private final LaneService service;
  public LaneController(LaneRepository lanes,LaneService service){this.lanes=lanes;this.service=service;}
- @GetMapping public String list(Model m){m.addAttribute("lanes",lanes.findAll());return "lanes/list";}
- @GetMapping("/{id}") public String detail(@PathVariable long id,Model m){m.addAttribute("lane",lanes.findOne(id));m.addAttribute("schedules",lanes.schedules(id));m.addAttribute("lanes",lanes.findAll());return "lanes/detail";}
+ @GetMapping public String list(Model m){m.addAttribute("lanes",service.findLanes());return "lanes/list";}
+ @GetMapping("/{id}") public String detail(@PathVariable long id,Model m){m.addAttribute("lane",lanes.findOne(id));m.addAttribute("schedules",lanes.schedules(id));m.addAttribute("lanes",service.findLanes());return "lanes/detail";}
  @PostMapping("/{id}/status") public String change(@PathVariable long id,@RequestParam String status,RedirectAttributes r){
   try{
    if("MAINTENANCE".equals(status)){var result=service.markMaintenance(id);r.addFlashAttribute("message","점검 처리: 재배정 "+result.replaced()+"건 / 실패 예약 "+result.failedReservations());}

@@ -25,6 +25,7 @@ java, javac, Maven의 Java version이 모두 21인지 확인합니다. release v
 - 9·10번 레인은 점검중 상태입니다.
 
 ## 주요 기능
+- 영업시간 13:00~24:00 (Asia/Seoul), Oracle 세션 시간대 통일
 - 레인 조회, 고장/점검 처리, 대체 레인 재배정 및 실패 표시, 점검 완료
 - 실제 방문 인원 확인, 개별 이용 시작/종료, 미사용, 전체 종료, 이용시간 연장, 추가 레인 배정
 - RESERVATION_LANE 독립 PK 및 USAGE의 배정 ID FK, 영문 상태값
@@ -32,7 +33,7 @@ java, javac, Maven의 Java version이 모두 21인지 확인합니다. release v
 - 팀 공통 잠금 규칙, 인증, 영업 마감 및 재배정실패 복구 정책은 통합 전 협의가 필요합니다.
 
 ## Oracle 19c 연결
-Oracle 초기화는 자동 실행되지 않습니다. 먼저 sql/00_check_oracle.sql로 읽기 전용 점검을 진행합니다. sql/03_v15_schema_fresh_only.sql은 별도 빈 테스트 스키마 전용이며 기존 데이터의 마이그레이션 스크립트가 아닙니다. IDENTITY는 팀 합의 전의 제안입니다.
+Oracle 초기화는 자동 실행되지 않습니다. 먼저 sql/00_check_oracle.sql로 읽기 전용 점검을 진행합니다. sql/03_v15_schema_fresh_only.sql은 기존 프로젝트 테이블이 없는 개인 테스트 스키마 전용이며 기존 데이터 마이그레이션 스크립트가 아닙니다. 기존 BAK_V15_* 테이블이 있는 경우 docs/V15_MIGRATION.md를 먼저 읽으세요. 신규 테이블이 일부 존재하는 상태에서는 재실행하지 않습니다. IDENTITY는 팀 합의 전의 제안입니다.
 
 SSH 터널을 사용하는 경우 학교 정책에 따라 허용된 터널을 먼저 연결합니다.
 
@@ -52,3 +53,12 @@ Oracle 로그인에는 활성 상태의 ADMIN 회원 및 BCrypt 비밀번호 해
 - 이 업그레이드 커밋은 편집 환경에서 Maven 빌드 및 실제 DB 테스트를 실행하지 않았습니다.
 - 기존 문서보다 [V15_MIGRATION.md](docs/V15_MIGRATION.md)를 우선합니다.
 - 팀 스키마와 인터페이스를 합의하기 전 main으로 병합하지 않습니다.
+
+## Oracle 테스트 데이터 준비
+DDL 및 초기 레인 생성 이후, 별도의 개인 테스트 스키마에서만 실행합니다. 이미 입력된 데이터가 있으면 시드가 중단됩니다. Windows PowerShell에서 프로젝트 컴파일 후:
+```powershell
+mvn dependency:build-classpath '-Dmdep.outputFile=target/classpath.txt'
+$cp = (Get-Content target/classpath.txt -Raw).Trim()
+java -cp "target/classes;$cp" com.example.bowling.tools.OracleAdminHashTool
+```
+로컬 콘솔에서 테스트용 비밀번호를 입력하면 BCrypt 해시가 생성됩니다. SQL*Plus에서 `@05_seed_oracle_test_only.sql`을 실행하고 해당 해시를 입력합니다. 로그인 ID는 `role3_test_admin`입니다. 비밀번호와 해시를 저장소에 올리지 마세요. 테스트 예약 시간은 실행 시각과 영업시간에 맞춰 생성되므로 영업시간 밖에는 다음 이용 가능 시간까지 시작이 제한됩니다.

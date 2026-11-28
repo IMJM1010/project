@@ -26,6 +26,8 @@ public class UsageRepository {
   Booking b=booking(id);
   jdbc.queryForObject("SELECT member_id FROM MEMBER WHERE member_id=? FOR UPDATE",Long.class,b.memberId());
   jdbc.queryForObject("SELECT reservation_id FROM RESERVATION WHERE reservation_id=? FOR UPDATE",Long.class,id);
+  for(Assignment a:assignments(id)) jdbc.queryForObject("SELECT reservation_lane_id FROM RESERVATION_LANE WHERE reservation_lane_id=? FOR UPDATE",Long.class,a.id());
+  for(Assignment a:assignments(id)) for(UsageState u:byAssignment(a.id())) jdbc.queryForObject("SELECT usage_id FROM USAGE WHERE usage_id=? FOR UPDATE",Long.class,u.id());
   return booking(id);
  }
  private Assignment assignmentRow(java.sql.ResultSet rs,int i)throws java.sql.SQLException{
@@ -38,7 +40,7 @@ public class UsageRepository {
  public List<Assignment> pendingOnLane(long lane,LocalDateTime now){return jdbc.query("""
  SELECT rl.reservation_lane_id,rl.reservation_id,rl.lane_id,rl.assigned_start_time,rl.usage_status
  FROM RESERVATION_LANE rl JOIN RESERVATION r ON r.reservation_id=rl.reservation_id
- WHERE rl.lane_id=? AND rl.usage_status='WAITING' AND r.status IN ('CONFIRMED','IN_USE','REALLOCATION_FAILED')
+ WHERE rl.lane_id=? AND rl.usage_status='WAITING' AND r.status IN ('CONFIRMED','IN_USE')
  AND r.reservation_end_time>? ORDER BY rl.assigned_start_time,rl.reservation_lane_id
  """,this::assignmentRow,lane,ts(now));}
  public List<UsageState> byAssignment(long id){return jdbc.query("SELECT usage_id,reservation_lane_id,actual_start_time,actual_end_time FROM USAGE WHERE reservation_lane_id=?",(rs,i)->new UsageState(rs.getLong(1),rs.getLong(2),dt(rs,3),dt(rs,4)),id);}
@@ -62,7 +64,7 @@ public class UsageRepository {
  public void bookingState(long id,ReservationStatus s,LocalDateTime now){jdbc.update("UPDATE RESERVATION SET status=?,updated_at=? WHERE reservation_id=?",s.name(),ts(now),id);}
  public void attendance(long id,int n,LocalDateTime now){jdbc.update("UPDATE RESERVATION SET actual_person_count=?,updated_at=? WHERE reservation_id=?",n,ts(now),id);}
  public void extend(long id,LocalDateTime end,LocalDateTime now){jdbc.update("UPDATE RESERVATION SET reservation_end_time=?,updated_at=? WHERE reservation_id=?",ts(end),ts(now),id);}
- public void move(long assignmentId,long lane){jdbc.update("UPDATE RESERVATION_LANE SET lane_id=? WHERE reservation_lane_id=? AND usage_status='WAITING'",lane,assignmentId);}
+ public void move(long assignmentId,long lane){if(jdbc.update("UPDATE RESERVATION_LANE SET lane_id=? WHERE reservation_lane_id=? AND usage_status='WAITING'",lane,assignmentId)!=1)throw new BusinessException("대체 레인 배정 실패");}
  public Assignment add(long reservation,long lane,LocalDateTime now){
   jdbc.update("INSERT INTO RESERVATION_LANE(reservation_id,lane_id,assigned_start_time,usage_status) VALUES(?,?,?,'WAITING')",reservation,lane,ts(now));
   return assignment(reservation,lane);
@@ -73,6 +75,13 @@ public class UsageRepository {
   WHERE rl.lane_id=? AND r.reservation_id<>? AND r.status IN ('CONFIRMED','IN_USE','COMPLETED','REALLOCATION_FAILED')
   AND rl.assigned_start_time<? AND r.reservation_end_time>?
   """,Integer.class,lane,excludedReservation,ts(end),ts(start))>0;
+ }
+ public boolean memberConflict(long memberId,LocalDateTime start,LocalDateTime end,long excludedReservation){
+  return jdbc.queryForObject("""
+  SELECT COUNT(*) FROM RESERVATION WHERE member_id=? AND reservation_id<>?
+  AND status IN ('CONFIRMED','IN_USE','COMPLETED','REALLOCATION_FAILED')
+  AND reservation_start_time<? AND reservation_end_time>?
+  """,Integer.class,memberId,excludedReservation,ts(end),ts(start))>0;
  }
  public List<UsageInfo> listAll(){return jdbc.query("""
  SELECT u.usage_id,rl.reservation_lane_id,r.reservation_id,l.lane_id,l.lane_number,m.member_name,u.actual_start_time,u.actual_end_time,rl.usage_status

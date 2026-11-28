@@ -13,9 +13,10 @@ import java.util.*;
 public class LaneService {
  private final LaneRepository lanes;private final UsageRepository repo;private final UsageService usage;
  public LaneService(LaneRepository lanes,UsageRepository repo,UsageService usage){this.lanes=lanes;this.repo=repo;this.usage=usage;}
+ @Transactional(readOnly=true) public java.util.List<com.example.bowling.dto.LaneInfo> findLanes(){return lanes.findAll();}
  public record MaintenanceResult(int replaced,List<Long> failedReservations){}
  @Transactional public MaintenanceResult markMaintenance(long id){
-  lanes.lockAll();String status=lanes.findOne(id).laneStatus();LocalDateTime n=UsageService.now();
+  lanes.lockAll();String status=lanes.findOne(id).laneStatus();LocalDateTime n=usage.now();
   if(status.equals("IN_USE")){
    // Active assignment is never rewritten. End its real usage first.
    UsageRepository.UsageState u=repo.activeOnLane(id);
@@ -25,6 +26,9 @@ public class LaneService {
   int replaced=0;List<Long> failures=new ArrayList<>();
   for(Assignment a:repo.pendingOnLane(id,n)){
    Booking b=repo.lockBooking(a.reservationId());
+   // One allocation per reservation and failed lane (UK_RL_RES_LANE).
+   // Do not write a replacement until a candidate has passed all checks.
+   if(b.status()!=ReservationStatus.CONFIRMED && b.status()!=ReservationStatus.IN_USE)continue;
    Set<Long> assigned=new HashSet<>();repo.assignments(b.id()).forEach(x->assigned.add(x.laneId()));
    Optional<Long> candidate=lanes.findAll().stream().filter(l->!l.laneStatus().equals("MAINTENANCE")&&!assigned.contains(l.laneId()))
     .filter(l->!repo.conflict(l.laneId(),a.start(),b.end(),b.id()))
@@ -37,6 +41,6 @@ public class LaneService {
  }
  @Transactional public void restoreLane(long id){
   lanes.lockAll();if(!lanes.findOne(id).laneStatus().equals("MAINTENANCE")||lanes.countActiveUsage(id)>0)throw new BusinessException("점검 중이며 실제 이용이 없는 레인만 복구할 수 있습니다.");
-  lanes.setStatus(id,LaneStatus.AVAILABLE,UsageService.now());
+  lanes.setStatus(id,LaneStatus.AVAILABLE,usage.now());
  }
 }

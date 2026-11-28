@@ -22,7 +22,7 @@ public class LaneRepository {
  // All scheduling writers must acquire this same lock in this same order.
  public void lockAll(){
   List<Long> ids=jdbc.query("SELECT lane_id FROM LANE ORDER BY lane_id",(rs,i)->rs.getLong(1));
-  if(ids.size()!=10) throw new BusinessException("레인 초기 데이터 10개를 확인하세요.");
+  if(!ids.equals(java.util.stream.LongStream.rangeClosed(1,10).boxed().toList())) throw new BusinessException("레인 초기 데이터 10개를 확인하세요.");
   for(long id:ids) jdbc.queryForObject("SELECT lane_id FROM LANE WHERE lane_id=? FOR UPDATE",Long.class,id);
  }
  public int countActiveUsage(long id){return jdbc.queryForObject("""
