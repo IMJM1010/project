@@ -62,4 +62,25 @@ class LaneUsageIntegrationTest {
  @Test void earlyCompletionKeepsSlot(){long id=usage.startUsage(101);usage.endUsage(id);assertThat(repo.conflict(1,NOW,NOW.plusMinutes(1),9999)).isTrue();assertThat(repo.conflict(1,NOW.plusMinutes(45),NOW.plusMinutes(60),9999)).isFalse();}
  @Test void unusedAllocationKeepsSlot(){usage.startUsage(102);usage.markUnused(103);assertThat(repo.conflict(3,NOW,NOW.plusMinutes(1),9999)).isTrue();}
  @Test void addedLaneStartsAtCurrentTime(){usage.startUsage(101);usage.addLane(1001,5);assertThat(repo.assignment(1001,5).start()).isEqualTo(NOW);}
+ @Test void concurrentStartsCreateExactlyOneUsage() throws Exception {
+  var pool=java.util.concurrent.Executors.newFixedThreadPool(2);
+  var ready=new java.util.concurrent.CountDownLatch(2);
+  var go=new java.util.concurrent.CountDownLatch(1);
+  java.util.concurrent.Callable<Boolean> task=()->{
+   var context=org.springframework.security.core.context.SecurityContextHolder.createEmptyContext();
+   context.setAuthentication(org.springframework.security.authentication.UsernamePasswordAuthenticationToken.authenticated("test-admin","unused",org.springframework.security.core.authority.AuthorityUtils.createAuthorityList("ROLE_ADMIN")));
+   org.springframework.security.core.context.SecurityContextHolder.setContext(context);
+   try {
+    ready.countDown();
+    if(!go.await(10,java.util.concurrent.TimeUnit.SECONDS))throw new IllegalStateException("Start barrier timed out");
+    try {usage.startUsage(101);return true;}catch(BusinessException expected){return false;}
+   }finally{org.springframework.security.core.context.SecurityContextHolder.clearContext();}
+  };
+  try {
+   var first=pool.submit(task);var second=pool.submit(task);
+   assertThat(ready.await(10,java.util.concurrent.TimeUnit.SECONDS)).isTrue();go.countDown();
+   assertThat(java.util.List.of(first.get(15,java.util.concurrent.TimeUnit.SECONDS),second.get(15,java.util.concurrent.TimeUnit.SECONDS))).containsExactlyInAnyOrder(true,false);
+   assertThat(repo.byAssignment(101)).hasSize(1);assertThat(lanes.countActiveUsage(1)).isEqualTo(1);
+  }finally{go.countDown();pool.shutdownNow();}
+ }
 }

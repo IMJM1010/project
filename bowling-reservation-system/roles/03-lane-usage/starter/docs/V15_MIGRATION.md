@@ -16,3 +16,5 @@
 - Oracle session time zone is Asia/Seoul. Oracle profile binds to loopback for personal testing. Demo disables time window intentionally. New tests use a fixed business clock.
 - sql/05_seed_oracle_test_only.sql is opt-in, requires empty member/reservation/allocation/usage tables and ten AVAILABLE lanes. It accepts a locally generated BCrypt hash; no plaintext password is committed. See README. Do not run on a shared database.
 - Current branch modifications were not compiled or executed against H2/Oracle by the editor. Re-run all tests locally before integration.
+
+- A two-thread H2 test attempts to start the same assignment and expects one success. Oracle concurrent testing and cross-role reservation writer locking are still required.

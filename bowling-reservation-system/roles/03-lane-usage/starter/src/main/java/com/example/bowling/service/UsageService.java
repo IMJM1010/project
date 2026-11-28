@@ -79,9 +79,9 @@ public class UsageService {
   if(b.status()!=ReservationStatus.IN_USE||minutes<=0||minutes>120||!n.isBefore(b.end()))throw new BusinessException("이용 중 예약만 종료 전 1~120분 연장할 수 있습니다.");
   LocalDateTime end=b.end().plusMinutes(minutes),close=b.start().toLocalDate().plusDays(1).atStartOfDay();
   if(b.start().getHour()<openHour||end.isAfter(close))throw new BusinessException("영업시간을 초과합니다.");
-  if(repo.memberConflict(b.memberId(),b.end(),end,id))throw new BusinessException("회원의 다른 예약과 시간이 중복됩니다.");
+  if(repo.memberConflict(b.memberId(),b.start(),end,id))throw new BusinessException("회원의 다른 예약과 시간이 중복됩니다.");
   for(Assignment a:repo.assignments(id)){
-   if(lanes.findOne(a.laneId()).laneStatus().equals("MAINTENANCE")||repo.conflict(a.laneId(),b.end(),end,id))throw new BusinessException("점검 또는 다음 예약과 충돌하여 전체 연장할 수 없습니다.");
+   if(lanes.findOne(a.laneId()).laneStatus().equals("MAINTENANCE")||repo.conflict(a.laneId(),a.start(),end,id))throw new BusinessException("점검 또는 다음 예약과 충돌하여 전체 연장할 수 없습니다.");
   }
   repo.extend(id,end,n);
  }
